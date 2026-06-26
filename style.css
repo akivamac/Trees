@@ -1,0 +1,519 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  font-family: 'Georgia', serif;
+  background: #1a1a1a;
+}
+
+/* ── Layout ─────────────────────────────────────────── */
+
+#app {
+  display: flex;
+  width: 100vw;
+  height: 100vh;
+}
+
+#game-wrap {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  background: #000;
+}
+
+#canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  touch-action: none;
+}
+
+/* ── Sidebar ─────────────────────────────────────────── */
+
+#sidebar {
+  width: 270px;
+  flex-shrink: 0;
+  background: #f5f0e8;
+  border-left: 1px solid #ddd6c8;
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.sidebar-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px 10px;
+  background: #ede7d9;
+  border-bottom: 1px solid #ddd6c8;
+  font-size: 0.78rem;
+  color: #5a4a35;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+#time-display {
+  font-weight: bold;
+  letter-spacing: 0.02em;
+}
+
+#season-display {
+  font-style: italic;
+  color: #7a6a52;
+}
+
+.sidebar-section {
+  border-bottom: 1px solid #e0d8cc;
+  padding: 10px 14px;
+}
+
+.sidebar-section h3 {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #8a7a62;
+  margin-bottom: 8px;
+  font-family: 'Georgia', serif;
+}
+
+/* ── Vitals ─────────────────────────────────────────── */
+
+.stat-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 5px;
+}
+
+.stat-row label {
+  width: 58px;
+  font-size: 0.72rem;
+  color: #5a4a35;
+  flex-shrink: 0;
+}
+
+.bar-bg {
+  flex: 1;
+  height: 8px;
+  background: #e0d8cc;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.bar {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease, background 0.5s ease;
+}
+
+/* ── Skills ─────────────────────────────────────────── */
+
+.skill-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.72rem;
+  color: #5a4a35;
+  padding: 2px 0;
+}
+
+.skill-lvl {
+  font-weight: bold;
+  color: #8a7a62;
+  min-width: 20px;
+  text-align: right;
+}
+
+/* ── Inventory ───────────────────────────────────────── */
+
+.empty-note {
+  font-size: 0.72rem;
+  color: #aaa;
+  font-style: italic;
+}
+
+/* ── Journal ─────────────────────────────────────────── */
+
+.journal-entry {
+  font-size: 0.72rem;
+  color: #5a4a35;
+  margin-bottom: 5px;
+  line-height: 1.4;
+}
+
+.journal-day {
+  font-weight: bold;
+  color: #8a7a62;
+}
+
+/* ── Crosshair ───────────────────────────────────────── */
+
+#crosshair {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  color: rgba(255, 255, 255, 0.75);
+  font-size: 1.4rem;
+  pointer-events: none;
+  display: none;
+  user-select: none;
+  line-height: 1;
+  text-shadow: 0 0 3px rgba(0,0,0,0.6);
+}
+
+/* ── Overlay ─────────────────────────────────────────── */
+
+#overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.55);
+  z-index: 100;
+}
+
+#overlay-box {
+  text-align: center;
+  color: #fff;
+  padding: 40px 50px;
+  background: rgba(0, 0, 0, 0.5);
+  border-radius: 12px;
+  backdrop-filter: blur(6px);
+  border: 1px solid rgba(255,255,255,0.15);
+}
+
+#overlay-box h1 {
+  font-size: 2.8rem;
+  font-weight: normal;
+  letter-spacing: 0.1em;
+  margin-bottom: 8px;
+  color: #f0e8d8;
+}
+
+#overlay-box p {
+  font-size: 0.9rem;
+  color: #bbb;
+  margin-bottom: 24px;
+}
+
+#play-btn {
+  padding: 12px 32px;
+  font-size: 1rem;
+  font-family: 'Georgia', serif;
+  background: #4a7c2f;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  transition: background 0.2s;
+}
+
+#play-btn:hover {
+  background: #3d6b22;
+}
+
+/* ── Joystick ─────────────────────────────────────────── */
+
+#joystick-base {
+  position: absolute;
+  bottom: 120px;
+  left: 40px;
+  width: 100px;
+  height: 100px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.15);
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  touch-action: none;
+  z-index: 50;
+}
+
+#joystick-knob {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.4);
+  border: 2px solid rgba(255, 255, 255, 0.6);
+  pointer-events: none;
+}
+
+/* ── Arm pad ─────────────────────────────────────────── */
+
+.arm-row {
+  display: flex;
+  gap: 10px;
+}
+
+.arm-col {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.arm-pad-label {
+  font-size: 0.7rem;
+  font-weight: bold;
+  color: #6a5a42;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.arm-pad {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 1;
+  background: #e0d8cc;
+  border: 2px solid #b8b0a0;
+  border-radius: 10px;
+  touch-action: none;
+  cursor: crosshair;
+  user-select: none;
+  box-shadow: inset 0 1px 4px rgba(0,0,0,0.08);
+}
+
+.arm-dot {
+  position: absolute;
+  width: 22px;
+  height: 22px;
+  background: #4a7c2f;
+  border-radius: 50%;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.3);
+  transition: background 0.1s;
+}
+
+.curl-btn {
+  width: 100%;
+  padding: 9px 0;
+  font-size: 0.78rem;
+  font-family: 'Georgia', serif;
+  background: #ddd6c8;
+  color: #5a4a35;
+  border: 1px solid #bbb4a8;
+  border-radius: 6px;
+  cursor: pointer;
+  letter-spacing: 0.04em;
+  transition: background 0.15s, color 0.15s;
+  touch-action: manipulation;
+}
+
+.curl-btn:active {
+  background: #c8c0b0;
+}
+
+.curl-btn.curled {
+  background: #4a7c2f;
+  color: #fff;
+  border-color: #3a6020;
+}
+
+.curl-btn.curled:active {
+  background: #3d6b22;
+}
+
+/* ── Inventory ───────────────────────────────────────── */
+
+.inv-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid #ece4d8;
+  font-size: 0.72rem;
+  color: #5a4a35;
+}
+
+.inv-row:last-child { border-bottom: none; }
+
+.inv-name { flex: 1; }
+
+.inv-qty {
+  font-size: 0.68rem;
+  color: #8a7a62;
+}
+
+.inv-equip-btn {
+  padding: 3px 8px;
+  font-size: 0.65rem;
+  font-family: 'Georgia', serif;
+  background: #ddd6c8;
+  color: #5a4a35;
+  border: 1px solid #bbb4a8;
+  border-radius: 4px;
+  cursor: pointer;
+  white-space: nowrap;
+  touch-action: manipulation;
+}
+
+.inv-equip-btn.equipped {
+  background: #4a7c2f;
+  color: #fff;
+  border-color: #3a6020;
+}
+
+.equipped-name {
+  font-size: 0.78rem;
+  color: #3a6020;
+  font-weight: bold;
+  padding: 2px 0;
+}
+
+/* ── Supply Bin Panel ────────────────────────────────── */
+
+#bin-panel {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: #f0ead8;
+  border-bottom: 2px solid #c8b89a;
+  padding: 0 0 10px;
+}
+
+.bin-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px 14px 8px;
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: #5a4a35;
+  border-bottom: 1px solid #ddd6c8;
+  background: #e8dfc8;
+}
+
+#bin-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 1rem;
+  color: #8a7a62;
+  line-height: 1;
+  padding: 2px 4px;
+  touch-action: manipulation;
+}
+
+#bin-items-list {
+  padding: 6px 14px 0;
+}
+
+.bin-item-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+  border-bottom: 1px solid #e0d8cc;
+  font-size: 0.74rem;
+  color: #5a4a35;
+}
+
+.bin-item-row:last-child { border-bottom: none; }
+
+.bin-take-btn {
+  padding: 4px 12px;
+  font-size: 0.68rem;
+  font-family: 'Georgia', serif;
+  background: #4a7c2f;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+
+.bin-take-btn:active { background: #3d6b22; }
+
+/* ── Interact Prompt ─────────────────────────────────── */
+
+#interact-prompt {
+  position: absolute;
+  bottom: 160px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.55);
+  color: #fff;
+  font-family: 'Georgia', serif;
+  font-size: 0.82rem;
+  padding: 6px 16px;
+  border-radius: 20px;
+  pointer-events: none;
+  white-space: nowrap;
+  opacity: 1;
+  transition: opacity 0.2s;
+}
+
+#interact-prompt:empty { opacity: 0; }
+
+/* ── Toast ───────────────────────────────────────────── */
+
+#toast {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.7);
+  color: #fff;
+  font-family: 'Georgia', serif;
+  font-size: 0.8rem;
+  padding: 7px 18px;
+  border-radius: 20px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.3s;
+  white-space: nowrap;
+}
+
+#toast.visible { opacity: 1; }
+
+/* ── Scrollbar ────────────────────────────────────────── */
+
+#sidebar::-webkit-scrollbar {
+  width: 4px;
+}
+#sidebar::-webkit-scrollbar-track {
+  background: #f5f0e8;
+}
+#sidebar::-webkit-scrollbar-thumb {
+  background: #d0c8b8;
+  border-radius: 2px;
+}
+
+/* ── Action button (mobile) — old standalone style removed, now in grid ── */
+
+/* ── Mobile ───────────────────────────────────────────── */
+
+@media (max-width: 600px) {
+  #sidebar {
+    width: 200px;
+  }
+}
+
+@media (max-width: 400px) {
+  #sidebar {
+    width: 160px;
+  }
+  .stat-row label {
+    width: 44px;
+    font-size: 0.65rem;
+  }
+}

@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Forest</title>
+  <link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+  <div id="app">
+
+    <!-- ── Game View ── -->
+    <div id="game-wrap">
+      <canvas id="canvas"></canvas>
+      <div id="crosshair">+</div>
+
+      <!-- Click-to-play overlay -->
+      <div id="overlay">
+        <div id="overlay-box">
+          <h1>Forest</h1>
+          <p>Click to enter</p>
+          <button id="play-btn">Enter Forest</button>
+        </div>
+      </div>
+
+      <!-- Touch joystick (mobile only, hidden on desktop via JS) -->
+      <div id="joystick-base">
+        <div id="joystick-knob"></div>
+      </div>
+
+      <!-- Proximity prompt -->
+      <div id="interact-prompt"></div>
+
+      <!-- DEBUG coordinate display -->
+      <div id="debug-pos" style="position:absolute;top:8px;left:8px;background:rgba(0,0,0,0.8);color:#fff;padding:6px 12px;font:bold 18px monospace;z-index:999;border-radius:4px;"></div>
+
+      <!-- Scope overlay -->
+      <div id="scope-overlay" style="display:none;position:absolute;inset:0;pointer-events:none;z-index:60;">
+        <!-- Dark vignette corners -->
+        <div style="position:absolute;inset:0;background:radial-gradient(circle at center, transparent 28%, rgba(0,0,0,0.97) 46%);"></div>
+        <!-- Scope ring -->
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:56vmin;height:56vmin;border-radius:50%;border:3px solid rgba(255,255,255,0.25);box-shadow:0 0 0 3px rgba(0,0,0,0.8);"></div>
+        <!-- Crosshair lines -->
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:56vmin;height:1px;background:rgba(255,255,255,0.55);"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:1px;height:56vmin;background:rgba(255,255,255,0.55);"></div>
+        <!-- Centre dot -->
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);width:4px;height:4px;border-radius:50%;background:rgba(255,80,80,0.9);"></div>
+        <!-- Range marks -->
+        <div style="position:absolute;top:50%;left:50%;transform:translate(calc(-50% + 14vmin),-50%);width:6px;height:1px;background:rgba(255,255,255,0.5);"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(calc(-50% - 14vmin - 6px),-50%);width:6px;height:1px;background:rgba(255,255,255,0.5);"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,calc(-50% + 14vmin));width:1px;height:6px;background:rgba(255,255,255,0.5);"></div>
+        <div style="position:absolute;top:50%;left:50%;transform:translate(-50%,calc(-50% - 14vmin - 6px));width:1px;height:6px;background:rgba(255,255,255,0.5);"></div>
+      </div>
+
+      <!-- Sleep fade overlay -->
+      <div id="sleep-fade" style="display:none;position:absolute;inset:0;background:#000;opacity:0;pointer-events:none;z-index:80;transition:opacity 1.5s ease;"></div>
+
+      <!-- Toast notification -->
+      <div id="toast"></div>
+
+      <!-- Mobile action buttons (2×3 grid) -->
+      <div style="position:absolute;bottom:120px;right:10px;display:grid;grid-template-columns:1fr 1fr;gap:6px;z-index:100;">
+        <button id="build-btn" style="width:82px;height:52px;border-radius:12px;background:rgba(120,80,30,0.92);color:#fff;font-size:0.74rem;font-family:Georgia,serif;font-weight:bold;border:2px solid rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.5);touch-action:manipulation;cursor:pointer;line-height:1.2;">🔨</button>
+        <button id="fire-btn"  style="width:82px;height:52px;border-radius:12px;background:rgba(180,80,20,0.92);color:#fff;font-size:0.74rem;font-family:Georgia,serif;font-weight:bold;border:2px solid rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.5);touch-action:manipulation;cursor:pointer;line-height:1.2;">🔥</button>
+        <button id="trap-btn"  style="width:82px;height:52px;border-radius:12px;background:rgba(80,60,20,0.92);color:#fff;font-size:0.74rem;font-family:Georgia,serif;font-weight:bold;border:2px solid rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.5);touch-action:manipulation;cursor:pointer;line-height:1.2;">🪤</button>
+        <button id="action-btn" style="width:82px;height:52px;border-radius:12px;background:rgba(74,124,47,0.92);color:#fff;font-size:0.74rem;font-family:Georgia,serif;font-weight:bold;border:2px solid rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.5);touch-action:manipulation;cursor:pointer;line-height:1.2;">✓</button>
+        <button id="water-btn" style="width:82px;height:52px;border-radius:12px;background:rgba(33,100,180,0.92);color:#fff;font-size:0.74rem;font-family:Georgia,serif;font-weight:bold;border:2px solid rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.5);touch-action:manipulation;cursor:pointer;line-height:1.2;">💧</button>
+        <button id="camp-btn"  style="width:82px;height:52px;border-radius:12px;background:rgba(90,74,42,0.92);color:#fff;font-size:0.74rem;font-family:Georgia,serif;font-weight:bold;border:2px solid rgba(255,255,255,0.4);box-shadow:0 4px 12px rgba(0,0,0,0.5);touch-action:manipulation;cursor:pointer;line-height:1.2;">🏕️</button>
+      </div>
+    </div>
+
+    <!-- ── Sidebar ── -->
+    <aside id="sidebar">
+
+      <!-- Bin panel (shown when near bin) -->
+      <div id="bin-panel" style="display:none">
+        <div class="bin-header">
+          <span>Supply Bin</span>
+          <button id="bin-close">✕</button>
+        </div>
+        <div id="bin-items-list"></div>
+      </div>
+
+      <div class="sidebar-header">
+        <span id="time-display">Day 1 · 8:00 AM</span>
+        <span id="season-display">Summer</span>
+      </div>
+
+      <!-- Vitals -->
+      <section class="sidebar-section" id="section-vitals">
+        <h3>Vitals</h3>
+        <div class="stat-row">
+          <label>Health</label>
+          <div class="bar-bg"><div class="bar" id="bar-health"></div></div>
+        </div>
+        <div class="stat-row">
+          <label>Hunger</label>
+          <div class="bar-bg"><div class="bar" id="bar-hunger"></div></div>
+        </div>
+        <div class="stat-row">
+          <label>Thirst</label>
+          <div class="bar-bg"><div class="bar" id="bar-thirst"></div></div>
+        </div>
+        <div class="stat-row">
+          <label>Stamina</label>
+          <div class="bar-bg"><div class="bar" id="bar-stamina"></div></div>
+        </div>
+        <div class="stat-row">
+          <label>Warmth</label>
+          <div class="bar-bg"><div class="bar" id="bar-warmth"></div></div>
+        </div>
+        <div class="stat-row">
+          <label>Sleep</label>
+          <div class="bar-bg"><div class="bar" id="bar-sleep"></div></div>
+        </div>
+      </section>
+
+      <!-- Inventory -->
+      <section class="sidebar-section" id="section-inventory">
+        <h3>Inventory</h3>
+        <p class="empty-note">Empty</p>
+      </section>
+
+      <!-- Arm control -->
+      <section class="sidebar-section" id="section-arm">
+        <h3>Arms</h3>
+        <div class="arm-row">
+          <div class="arm-col">
+            <div class="arm-pad-label">Left</div>
+            <div class="arm-pad" id="arm-pad-left"><div class="arm-dot"></div></div>
+            <button class="curl-btn" id="curl-left" data-side="-1">Curl</button>
+          </div>
+          <div class="arm-col">
+            <div class="arm-pad-label">Right</div>
+            <div class="arm-pad" id="arm-pad-right"><div class="arm-dot"></div></div>
+            <button class="curl-btn" id="curl-right" data-side="1">Curl</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Tools -->
+      <section class="sidebar-section" id="section-tools">
+        <h3>Equipped</h3>
+        <p class="empty-note">Nothing equipped</p>
+      </section>
+
+      <!-- Quick actions -->
+      <section class="sidebar-section" id="section-actions">
+        <h3>Actions</h3>
+        <button id="mark-bed-btn" style="width:100%;padding:8px 12px;border-radius:8px;background:#5a4a2a;color:#fff;font:bold 0.85rem Georgia,serif;border:1px solid rgba(255,255,255,0.3);cursor:pointer;touch-action:manipulation;">🛏️ Mark this spot as bed</button>
+        <button id="structure-remove-btn" style="width:100%;margin-top:6px;padding:8px 12px;border-radius:8px;background:#4a3a22;color:#fff;font:bold 0.85rem Georgia,serif;border:1px solid rgba(255,255,255,0.3);cursor:pointer;touch-action:manipulation;">🔧 Take down structure</button>
+      </section>
+
+      <!-- Skills -->
+      <section class="sidebar-section" id="section-skills">
+        <h3>Skills</h3>
+        <div class="skill-row"><span>Woodcutting</span><span class="skill-lvl" id="skill-woodcutting">0</span></div>
+        <div class="skill-row"><span>Fishing</span><span class="skill-lvl" id="skill-fishing">0</span></div>
+        <div class="skill-row"><span>Hunting</span><span class="skill-lvl" id="skill-hunting">0</span></div>
+        <div class="skill-row"><span>Trapping</span><span class="skill-lvl" id="skill-trapping">0</span></div>
+        <div class="skill-row"><span>Foraging</span><span class="skill-lvl" id="skill-foraging">0</span></div>
+        <div class="skill-row"><span>Crafting</span><span class="skill-lvl" id="skill-crafting">0</span></div>
+        <div class="skill-row"><span>Building</span><span class="skill-lvl" id="skill-building">0</span></div>
+        <div class="skill-row"><span>Cooking</span><span class="skill-lvl" id="skill-cooking">0</span></div>
+        <div class="skill-row"><span>Medicine</span><span class="skill-lvl" id="skill-medicine">0</span></div>
+        <div class="skill-row"><span>Stealth</span><span class="skill-lvl" id="skill-stealth">0</span></div>
+      </section>
+
+      <!-- Journal -->
+      <section class="sidebar-section" id="section-journal">
+        <h3>Journal</h3>
+        <div id="journal-entries"></div>
+      </section>
+
+    </aside>
+  </div>
+
+  <!-- Mobile debug console — tap the floating button to open -->
+  <script src="https://cdn.jsdelivr.net/npm/eruda@3/eruda.min.js"></script>
+  <script>eruda.init();</script>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="js/main.js?v=167"></script>
+</body>
+</html>
