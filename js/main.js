@@ -1,8 +1,8 @@
 import * as THREE from 'three';
 import { Player }                           from './player.js?v=2';
-import { createWorld, placeGroundTools }    from './world.js?v=28';
-import { updateUI }                         from './ui.js?v=6';
-import { state, loadState, saveState as _rawSaveState } from './state.js?v=17';
+import { createWorld, placeGroundTools }    from './world.js?v=29';
+import { updateUI }                         from './ui.js?v=7';
+import { state, loadState, saveState as _rawSaveState } from './state.js?v=18';
 import { Hands }                            from './hands.js?v=5';
 import { FallenTree }                       from './fallen-tree.js?v=3';
 import { makeHandTool, makeLitMatchTool, makeGroundTool } from './tools.js?v=5';
@@ -10,6 +10,7 @@ import { FireManager }                       from './fire.js?v=2';
 import { FireAudio }                         from './fire-audio.js?v=1';
 import { WildlifeManager }                   from './wildlife.js?v=1';
 import { TrapManager }                       from './trapping.js?v=3';
+import { ForagingManager, FORAGE_INFO }      from './foraging.js?v=2';
 
 loadState();
 // time now restores from save
@@ -33,6 +34,26 @@ const camera = new THREE.PerspectiveCamera(75, 1, 0.1, 1000);
 // ── Scene ─────────────────────────────────────────────────────────
 const worldScene = new THREE.Scene();
 const { sun, ambient, billboards, binMesh, riverMesh } = createWorld(worldScene);
+
+// ── Foraging ──────────────────────────────────────────────────────
+const foragingManager = new ForagingManager(worldScene, state);
+window._foragingManager = foragingManager;
+
+// ── Rain particles ────────────────────────────────────────────────
+const _rainGeo = new THREE.BufferGeometry();
+const _rainPos = new Float32Array(2000 * 3);
+for (let i = 0; i < 2000; i++) {
+  _rainPos[i*3]   = (Math.random() - 0.5) * 40;
+  _rainPos[i*3+1] = Math.random() * 22;
+  _rainPos[i*3+2] = (Math.random() - 0.5) * 40;
+}
+_rainGeo.setAttribute('position', new THREE.BufferAttribute(_rainPos, 3));
+const rainParticles = new THREE.Points(_rainGeo, new THREE.PointsMaterial({ color: 0x99bbdd, size: 0.07, transparent: true, opacity: 0.55, depthWrite: false }));
+rainParticles.visible = false;
+worldScene.add(rainParticles);
+
+// ── Weather target (lerp toward) ──────────────────────────────────
+let _windTarget = { speed: state.time.weather ? state.time.weather.wind.speed : 2, dir: state.time.weather ? state.time.weather.wind.dir : 180 };
 
 // ── Player / Hands ────────────────────────────────────────────────
 const player = new Player(camera, canvas);
@@ -143,13 +164,19 @@ function getSkyColor(h) {
   return SKY.night.clone();
 }
 function updateDayNight(h) {
-  const sky = getSkyColor(h);
+  let sky = getSkyColor(h);
+  const w = state.time.weather;
+  if (w) {
+    if      (w.condition === 'overcast') sky = sky.clone().lerp(new THREE.Color(0x7a8899), 0.5);
+    else if (w.condition === 'rain')     sky = sky.clone().lerp(new THREE.Color(0x445566), 0.7);
+  }
   worldScene.background = sky;
   worldScene.fog.color  = sky;
-  const inDay      = h >= 6 && h <= 20;
-  const strength   = inDay ? Math.sin(((h - 6) / 14) * Math.PI) : 0;
-  sun.intensity    = strength * 1.6;
-  ambient.intensity = 0.25 + strength * 0.5;
+  const weatherMult = !w ? 1 : w.condition === 'overcast' ? 0.45 : w.condition === 'rain' ? 0.2 : 1;
+  const inDay       = h >= 6 && h <= 20;
+  const strength    = inDay ? Math.sin(((h - 6) / 14) * Math.PI) : 0;
+  sun.intensity     = strength * 1.6 * weatherMult;
+  ambient.intensity = (0.25 + strength * 0.5) * Math.max(0.4, weatherMult);
   const a = ((h - 6) / 14) * Math.PI;
   sun.position.set(Math.cos(a - Math.PI / 2) * 150, Math.sin(a) * 150, -30);
   sun.color.set(h < 9 || h > 17 ? 0xffb347 : 0xfff5e0);
@@ -771,34 +798,91 @@ function collectCooked() {
 
 // ── Eating ────────────────────────────────────────────────────────
 const EAT_VALUES = {
+  // Cooked meat
   'Cooked Venison':  35,
   'Cooked Rabbit':   25,
   'Cooked Squirrel': 18,
   'Cooked Trout':    22,
   'Cooked Bass':     22,
   'Cooked Catfish':  22,
-  'Rabbit':          10,  // raw — less benefit, slight health risk
+  // Raw meat (health risk)
+  'Rabbit':          10,
   'Venison':         12,
   'Squirrel Meat':    8,
   'Trout':           10,
   'Bass':            10,
   'Catfish':         10,
+  // Dried
+  'Dried Venison':      30,
+  'Dried Rabbit':       20,
+  'Dried Squirrel Meat':14,
+  'Dried Trout':        18,
+  'Dried Bass':         18,
+  'Dried Catfish':      18,
+  // Smoked
+  'Smoked Venison':     32,
+  'Smoked Rabbit':      22,
+  'Smoked Squirrel Meat':16,
+  'Smoked Trout':       20,
+  'Smoked Bass':        20,
+  'Smoked Catfish':     20,
+  // Foraged
+  'Huckleberry':        12,
+  'Rosehip':             8,
+  'Wild Onion':          6,
+  'Pine Nuts':          10,
+  'Chanterelle':        15,
+  'Oyster Mushroom':    12,
+  'Elderberry':          8,
+  'Death Cap':           0,  // sickness only
+  'Nightshade Berry':    0,  // sickness only
 };
 
 function tryEat() {
-  // Prefer cooked food first
-  let food = state.inventory.find(i => EAT_VALUES[i.name] && i.name.startsWith('Cooked'));
-  if (!food) food = state.inventory.find(i => EAT_VALUES[i.name]);
+  // Prefer cooked/dried/smoked first, then foraged, then raw
+  let food = state.inventory.find(i => EAT_VALUES[i.name] !== undefined && (i.name.startsWith('Cooked') || i.name.startsWith('Dried') || i.name.startsWith('Smoked')));
+  if (!food) food = state.inventory.find(i => EAT_VALUES[i.name] !== undefined && FORAGE_INFO[i.name]);
+  if (!food) food = state.inventory.find(i => EAT_VALUES[i.name] !== undefined);
   if (!food) return false;
 
-  const val = EAT_VALUES[food.name];
-  const isRaw = !food.name.startsWith('Cooked');
-  state.player.hunger = Math.min(100, state.player.hunger + val);
+  const val    = EAT_VALUES[food.name] || 0;
+  const isRaw  = !food.name.startsWith('Cooked') && !food.name.startsWith('Dried') && !food.name.startsWith('Smoked');
+  const info   = FORAGE_INFO[food.name];
 
   food.quantity--;
   if (food.quantity <= 0) state.inventory = state.inventory.filter(i => i !== food);
 
-  if (isRaw) {
+  // Check spoilage
+  if (food.freshUntil && state.time.day > food.freshUntil) {
+    state.player.sickness = Math.min(100, (state.player.sickness || 0) + 20);
+    state.player.hunger   = Math.min(100, state.player.hunger + Math.max(2, val * 0.3));
+    showToast(`The ${food.name} had spoiled! (sickness +20)`);
+    saveState(); return true;
+  }
+
+  // Sickness from poisonous forage
+  if (info && info.sickness > 0) {
+    state.player.sickness = Math.min(100, (state.player.sickness || 0) + info.sickness);
+    state.player.health   = Math.max(0, state.player.health - 5);
+    showToast(`That ${food.name} was poisonous! (sickness +${info.sickness})`);
+    state.journal.push({ day: state.time.day, text: `Ate ${food.name} — got very sick.` });
+    saveState(); return true;
+  }
+
+  state.player.hunger = Math.min(100, state.player.hunger + val);
+
+  // Health bonus (rosehip, etc)
+  if (info && info.healthBonus) {
+    state.player.health = Math.min(100, state.player.health + info.healthBonus);
+  }
+  // Raw elderberry penalty
+  if (info && info.rawPenalty) {
+    state.player.health = Math.max(0, state.player.health - info.rawPenalty);
+    showToast(`Ate ${food.name}. (+${val} hunger) Raw elderberries upset your stomach. (-${info.rawPenalty} health)`);
+    saveState(); return true;
+  }
+
+  if (isRaw && !info) {
     if (Math.random() < 0.3) {
       state.player.health = Math.max(0, state.player.health - 8);
       showToast(`Ate raw ${food.name}. (+${val} hunger) Stomach hurts... (-8 health)`);
@@ -806,8 +890,25 @@ function tryEat() {
       showToast(`Ate raw ${food.name}. (+${val} hunger)`);
     }
   } else {
-    showToast(`Ate ${food.name}. (+${val} hunger)`);
+    const bonus = (info && info.healthBonus) ? ` (+${info.healthBonus} health)` : '';
+    showToast(`Ate ${food.name}. (+${val} hunger)${bonus}`);
   }
+  saveState();
+  return true;
+}
+
+// ── Foraging action ───────────────────────────────────────────────
+function tryForage() {
+  const patch = foragingManager.getNearby(camera.position, 4.0);
+  console.log('[forage] cam pos', camera.position.x.toFixed(1), camera.position.z.toFixed(1), '| patch:', patch ? patch.data.type + ' @ ' + patch.data.x.toFixed(1) + ',' + patch.data.z.toFixed(1) : 'none');
+  if (!patch) return false;
+  const result   = foragingManager.harvest(patch, state.time.day);
+  const existing = state.inventory.find(i => i.name === result.name);
+  if (existing) existing.quantity += result.qty;
+  else state.inventory.push({ name: result.name, quantity: result.qty });
+  state.skills.foraging = Math.min(99, (state.skills.foraging || 0) + 1);
+  showToast(`Foraged ${result.qty}× ${result.name}.`);
+  state.journal.push({ day: state.time.day, text: `Foraged ${result.name}.` });
   saveState();
   return true;
 }
@@ -816,6 +917,113 @@ function tryEat() {
 const carcasses     = []; // { mesh, kind, cutsLeft }
 const worldMeat     = []; // { mesh, name } — meat pieces on ground
 const fallingAnimals = []; // { mesh, kind, loot, cuts, rotX, velY, done }
+
+// ── Drying racks ──────────────────────────────────────────────────
+const dryingRacks = []; // { mesh, data: { x, z, rot, slot } }
+
+function _makeDryingRackMesh(x, z, rot) {
+  const g      = new THREE.Group();
+  const woodMat = new THREE.MeshLambertMaterial({ color: 0x6b4c2a });
+  const cordMat = new THREE.MeshLambertMaterial({ color: 0xd4b896 });
+  for (const ox of [-0.75, 0.75]) {
+    const post = new THREE.Mesh(new THREE.CylinderGeometry(0.055, 0.068, 2.0, 8), woodMat);
+    post.position.set(ox, 1.0, 0);
+    post.castShadow = true;
+    g.add(post);
+  }
+  const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.038, 0.044, 1.6, 8), woodMat);
+  bar.rotation.z = Math.PI / 2;
+  bar.position.set(0, 1.88, 0);
+  bar.castShadow = true;
+  g.add(bar);
+  for (let ci = -0.4; ci <= 0.41; ci += 0.2) {
+    const cord = new THREE.Mesh(new THREE.CylinderGeometry(0.006, 0.006, 1.55, 4), cordMat);
+    cord.rotation.z = Math.PI / 2;
+    cord.position.set(ci, 1.72, 0);
+    g.add(cord);
+  }
+  g.position.set(x, 0, z);
+  if (rot !== undefined) g.rotation.y = rot;
+  worldScene.add(g);
+  return g;
+}
+
+function placeDryingRack() {
+  const item = state.inventory.find(i => i.name === 'Drying Rack');
+  if (!item) return false;
+  item.quantity--;
+  if (item.quantity <= 0) state.inventory = state.inventory.filter(i => i !== item);
+  const fwd = new THREE.Vector3();
+  camera.getWorldDirection(fwd); fwd.y = 0; fwd.normalize();
+  const x   = camera.position.x + fwd.x * 2.5;
+  const z   = camera.position.z + fwd.z * 2.5;
+  const rot = Math.atan2(fwd.x, fwd.z);
+  const mesh = _makeDryingRackMesh(x, z, rot);
+  const data = { x, z, rot, slot: null };
+  dryingRacks.push({ mesh, data });
+  state.equippedTool = null;
+  hands.dropItem(1);
+  showToast('Drying rack placed.');
+  saveState();
+  return true;
+}
+
+function nearestDryingRack(maxDist = 3.5) {
+  let best = null, bestDist = maxDist;
+  for (const r of dryingRacks) {
+    const dx = camera.position.x - r.data.x, dz = camera.position.z - r.data.z;
+    const d  = Math.sqrt(dx * dx + dz * dz);
+    if (d < bestDist) { best = r; bestDist = d; }
+  }
+  return best;
+}
+
+function tryCollectDried() {
+  const rack = nearestDryingRack();
+  if (!rack || !rack.data.slot || !rack.data.slot.done) return false;
+  const driedName = 'Dried ' + rack.data.slot.name;
+  const existing  = state.inventory.find(i => i.name === driedName);
+  if (existing) existing.quantity++;
+  else state.inventory.push({ name: driedName, quantity: 1, freshUntil: state.time.day + 14 });
+  rack.data.slot = null;
+  state.skills.cooking = Math.min(99, (state.skills.cooking || 0) + 1);
+  showToast(`Collected ${driedName}! Stays fresh 14 days.`);
+  saveState();
+  return true;
+}
+
+function tryHangToDry() {
+  const rack = nearestDryingRack();
+  if (!rack) return false;
+  if (rack.data.slot && rack.data.slot.done) { tryCollectDried(); return true; }
+  if (rack.data.slot && !rack.data.slot.done) { showToast('Rack already drying something.'); return true; }
+  const w = state.time.weather;
+  if (w && w.condition === 'rain') { showToast("Can't dry in the rain!"); return true; }
+  const DRYABLE = ['Venison','Rabbit','Squirrel Meat','Trout','Bass','Catfish'];
+  const food    = state.inventory.find(i => DRYABLE.includes(i.name));
+  if (!food) return false;
+  food.quantity--;
+  if (food.quantity <= 0) state.inventory = state.inventory.filter(i => i !== food);
+  rack.data.slot = { name: food.name, startDay: state.time.day, done: false };
+  showToast(`Hanging ${food.name} to dry... (ready tomorrow)`);
+  saveState();
+  return true;
+}
+
+function updateDryingRacks() {
+  const w = state.time.weather;
+  const isRaining = w && w.condition === 'rain';
+  for (const r of dryingRacks) {
+    if (!r.data.slot || r.data.slot.done) continue;
+    if (isRaining) {
+      r.data.slot = null;
+      showToast('Rain ruined the meat on your drying rack!');
+    } else if (state.time.day > r.data.slot.startDay) {
+      r.data.slot.done = true;
+      showToast(`Dried ${r.data.slot.name} is ready to collect!`);
+    }
+  }
+}
 
 function updateFallingAnimals(delta) {
   for (let i = fallingAnimals.length - 1; i >= 0; i--) {
@@ -1236,6 +1444,11 @@ function tryFlintStrike() {
   return true;
 }
 
+function canDigFirePit() {
+  const logs = state.inventory.find(i => i.name === 'Log');
+  return logs && logs.quantity >= 2;
+}
+
 function digFirePit() {
   if (!canDigFirePit()) { showToast('Need 2 Logs to build campfire.'); return; }
   const fwd = new THREE.Vector3();
@@ -1427,6 +1640,10 @@ function syncWorldState() {
   }));
   // Lanterns
   state.world.lanterns = lanternMeshes.map(l => ({ x: l.data.x, z: l.data.z, on: l.data.on }));
+  // Forage patches
+  state.world.foragePatches = foragingManager.syncToState();
+  // Drying racks
+  state.world.dryingRacks = dryingRacks.map(r => ({ x: r.data.x, z: r.data.z, rot: r.data.rot, slot: r.data.slot }));
 }
 
 // ── Restore all world objects from saved state ────────────────────
@@ -1590,6 +1807,13 @@ function restoreWorldState() {
       lanternMeshes.push({ mesh, light, data: l });
     }
   }
+  // Drying racks
+  for (const d of (state.world.dryingRacks || [])) {
+    const mesh = _makeDryingRackMesh(d.x, d.z, d.rot);
+    dryingRacks.push({ mesh, data: d });
+  }
+  // Forage patches (init from saved state)
+  foragingManager.init();
 }
 
 function nearestPost(maxDist = 3) {
@@ -2123,19 +2347,125 @@ function updateVitals(delta) {
     p.warmth = Math.min(100, p.warmth + 0.05 * delta);
   }
 
+  // Rain warmth drain (unless sheltered in tent)
+  const w = state.time.weather;
+  if (w && w.condition === 'rain' && !_playerUnderShelter()) {
+    p.warmth = Math.max(0, p.warmth - 0.08 * delta);
+  }
+
   if (p.hunger < 10 || p.thirst < 10) {
     p.health = Math.max(0, p.health - 0.03 * delta);
   } else if (p.hunger > 50 && p.thirst > 50 && p.warmth > 40) {
     p.health = Math.min(100, p.health + 0.15 * delta);
   }
 
+  // Sickness drains health
+  if (p.sickness > 0) {
+    p.health   = Math.max(0, p.health - p.sickness * 0.0015 * delta);
+    p.sickness = Math.max(0, p.sickness - 0.01 * delta); // slow natural recovery
+  }
+
   _warnCooldown = Math.max(0, _warnCooldown - delta);
   if (_warnCooldown <= 0) {
-    if      (p.hunger  < 15) { showToast('You are hungry...');        _warnCooldown = 25; }
-    else if (p.thirst  < 15) { showToast('You are thirsty...');       _warnCooldown = 25; }
-    else if (p.warmth  < 15) { showToast('You are freezing cold...');  _warnCooldown = 20; }
-    else if (p.sleep   < 15) { showToast('You are exhausted...');      _warnCooldown = 30; }
-    else if (p.health  < 20) { showToast('Your health is critical!');  _warnCooldown = 15; }
+    if      (p.sickness > 30)  { showToast('You feel very sick...');        _warnCooldown = 20; }
+    else if (p.hunger  < 15)   { showToast('You are hungry...');            _warnCooldown = 25; }
+    else if (p.thirst  < 15)   { showToast('You are thirsty...');           _warnCooldown = 25; }
+    else if (p.warmth  < 15)   { showToast('You are freezing cold...');     _warnCooldown = 20; }
+    else if (p.sleep   < 15)   { showToast('You are exhausted...');         _warnCooldown = 30; }
+    else if (p.health  < 20)   { showToast('Your health is critical!');     _warnCooldown = 15; }
+  }
+}
+
+function _playerUnderShelter() {
+  const px = camera.position.x, pz = camera.position.z;
+  for (const t of state.world.tents) {
+    const dx = px - t.x, dz = pz - t.z;
+    if (dx * dx + dz * dz < 14) return true;
+  }
+  // Check canvas shelters (ray-casting point-in-polygon on xz plane)
+  for (const s of state.world.structures) {
+    if (s.type !== 'canvas') continue;
+    const c = s.corners;
+    if (!c || c.length < 4) continue;
+    let inside = false;
+    for (let i = 0, j = c.length - 1; i < c.length; j = i++) {
+      const xi = c[i][0], zi = c[i][2];
+      const xj = c[j][0], zj = c[j][2];
+      if ((zi > pz) !== (zj > pz) && px < (xj - xi) * (pz - zi) / (zj - zi) + xi) {
+        inside = !inside;
+      }
+    }
+    if (inside) return true;
+  }
+  return false;
+}
+
+// ── Weather system ────────────────────────────────────────────────
+function updateWeather(delta) {
+  const w = state.time.weather;
+  if (!w) return;
+
+  // Lerp wind toward target
+  w.wind.speed += (_windTarget.speed - w.wind.speed) * Math.min(1, delta * 0.4);
+  w.wind.dir   += (_windTarget.dir   - w.wind.dir)   * Math.min(1, delta * 0.25);
+
+  w.nextChange -= delta;
+  if (w.nextChange > 0) return;
+
+  const prev = w.condition;
+  if (prev === 'clear') {
+    w.condition  = 'overcast';
+    w.nextChange = 120 + Math.random() * 240;
+    _windTarget.speed = 3 + Math.random() * 5;
+    _windTarget.dir   = Math.random() * 360;
+    showToast('Clouds rolling in...');
+  } else if (prev === 'overcast') {
+    w.condition  = Math.random() < 0.6 ? 'rain' : 'clear';
+    w.nextChange = w.condition === 'rain' ? 180 + Math.random() * 300 : 300 + Math.random() * 600;
+    if (w.condition === 'rain') {
+      _windTarget.speed = 5 + Math.random() * 5;
+      showToast('It starts to rain.');
+      // Ruin drying racks
+      for (const r of dryingRacks) {
+        if (r.data.slot && !r.data.slot.done) { r.data.slot = null; showToast('Rain ruined the meat on your drying rack!'); }
+      }
+    } else {
+      _windTarget.speed = 1 + Math.random() * 2;
+      _windTarget.dir   = Math.random() * 360;
+      showToast('The sky is clearing.');
+    }
+  } else { // rain
+    w.condition  = 'overcast';
+    w.nextChange = 120 + Math.random() * 180;
+    _windTarget.speed = 2 + Math.random() * 3;
+    showToast('Rain letting up...');
+  }
+
+  rainParticles.visible = (w.condition === 'rain');
+}
+
+function updateRainParticles(delta) {
+  if (!rainParticles.visible) return;
+  rainParticles.position.set(camera.position.x, camera.position.y, camera.position.z);
+  // Hide drops when under shelter
+  rainParticles.material.opacity = _playerUnderShelter() ? 0 : 0.55;
+  const pos   = rainParticles.geometry.attributes.position;
+  const SPEED = 18;
+  const arr   = pos.array;
+  for (let i = 0; i < pos.count; i++) {
+    arr[i * 3 + 1] -= SPEED * delta;
+    if (arr[i * 3 + 1] < -10) arr[i * 3 + 1] += 26;
+  }
+  pos.needsUpdate = true;
+}
+
+function updateRainBarrels(delta) {
+  const w = state.time.weather;
+  if (!w || w.condition !== 'rain') return;
+  for (const b of barrelMeshes) {
+    if (b.data.water < BARREL_MAX) {
+      b.data.water = Math.min(BARREL_MAX, b.data.water + delta * 0.04);
+    }
   }
 }
 
@@ -3316,12 +3646,15 @@ function onWater() {
   showToast('No water action available.');
 }
 
-// 🏕️ button — camp actions (sleep, eat, heal, lantern, bin)
+// 🏕️ button — camp actions (sleep, eat, heal, lantern, bin, forage, drying)
 function onCamp() {
   if (!player.isLocked) return;
   if (toggleNearLantern()) return;
   if (trySleep()) return;
   if (tryHeal()) return;
+  if (tryCollectDried()) return;
+  if (tryHangToDry()) return;
+  if (tryForage()) return;
   if (tryEat()) return;
   if (camera.position.distanceTo(binMesh.position) < 5) { openBinPanel(); return; }
   showToast('No camp action available.');
@@ -3427,25 +3760,46 @@ function plantHeldLogAsPost() {
   return true;
 }
 
-// 🔨 Build button — posts, beams, canvas, tent (or ADS when rifle equipped)
+// 🔨 Build button — posts, beams, canvas, tent, drying rack (or ADS when rifle equipped)
 function onBuild() {
   if (!player.isLocked) return;
-  if (state.equippedTool === 'Rifle')   { toggleADS();    return; }
-  if (state.equippedTool === 'Lantern') { placeLantern(); return; }
-  if (state.equippedTool === 'Barrel')  { placeBarrel();  return; }
-  if (state.equippedTool === 'Canvas')  { startCanvas();  return; }
-  if (state.equippedTool === 'Tent')    { placeTent();    return; }
+  if (state.equippedTool === 'Rifle')       { toggleADS();       return; }
+  if (state.equippedTool === 'Lantern')     { placeLantern();    return; }
+  if (state.equippedTool === 'Barrel')      { placeBarrel();     return; }
+  if (state.equippedTool === 'Canvas')      { startCanvas();     return; }
+  if (state.equippedTool === 'Tent')        { placeTent();       return; }
+  if (state.equippedTool === 'Drying Rack') { placeDryingRack(); return; }
   if (heldLog) { plantHeldLogAsPost(); return; }
   if (handleBuildInteract()) return;
   showToast('Nothing to build here.');
 }
 
-// 🔥 Fire button — fire pit stages only (or height-pick down)
+// 🔥 Fire button — fire pit stages, smoking
 function onFire() {
   if (!player.isLocked) return;
   if (_heightPick) { heightPickDown(); return; }
   if (handleFirePitInteract()) return;
+  if (trySmoke()) return;
   showToast('Need Shovel to dig pit, or be near a pit in progress.');
+}
+
+function trySmoke() {
+  const nearFire = nearestLitFire(camera.position, 4);
+  if (!nearFire) return false;
+  const greenWood = state.inventory.find(i => i.name === 'Green Wood');
+  if (!greenWood) return false;
+  const SMOKEABLE = ['Venison','Rabbit','Squirrel Meat','Trout','Bass','Catfish'];
+  const food = state.inventory.find(i => SMOKEABLE.includes(i.name));
+  if (!food) { showToast('Need raw meat or fish + Green Wood near fire to smoke.'); return true; }
+  if (cookingSlots.find(s => s.isSmoke)) { showToast('Already smoking something.'); return true; }
+  greenWood.quantity--;
+  if (greenWood.quantity <= 0) state.inventory = state.inventory.filter(i => i !== greenWood);
+  food.quantity--;
+  if (food.quantity <= 0) state.inventory = state.inventory.filter(i => i !== food);
+  cookingSlots.push({ name: 'Smoked ' + food.name, timer: 300, done: false, spit: null, firePos: nearFire.pos, isSmoke: true });
+  showToast(`Smoking ${food.name}... (5 min)`);
+  saveState();
+  return true;
 }
 
 // 🪤 Trap button — place or collect traps (or cancel height pick / canvas mode)
@@ -3524,6 +3878,9 @@ function animate() {
   }
 
   updateDayNight(state.time.hour + state.time.minute / 60);
+  updateWeather(delta);
+  updateRainParticles(delta);
+  updateRainBarrels(delta);
   player.update(delta);
   if (_firePitCooldown > 0) _firePitCooldown -= delta;
   if (_buildCooldown > 0)   _buildCooldown   -= delta;
@@ -3555,8 +3912,9 @@ function animate() {
       b.rotation.z = Math.sin(b.userData.shake * 28) * b.userData.shake * b.userData.shakeAmp;
     } else {
       const swayPhase = (b.userData.treeId || 0) * 0.93;
-      b.rotation.z = Math.sin(elapsed * 0.65 + swayPhase) * 0.013
-                   + Math.sin(elapsed * 1.1  + swayPhase * 1.4) * 0.006;
+      const windAmp   = 1 + (state.time.weather ? state.time.weather.wind.speed * 0.018 : 0);
+      b.rotation.z = (Math.sin(elapsed * 0.65 + swayPhase) * 0.013
+                   +  Math.sin(elapsed * 1.1  + swayPhase * 1.4) * 0.006) * windAmp;
     }
   }
 
@@ -3610,9 +3968,25 @@ function animate() {
     }
   }
 
-  // Campfire light flicker
+  // Campfire light flicker + rain extinguish
+  const _raining = state.time.weather && state.time.weather.condition === 'rain';
   for (const cf of campfires) {
-    if (cf.lit && cf.light) {
+    if (!cf.lit) continue;
+    // Rain extinguishes unprotected fires
+    if (_raining && !_playerUnderShelter() /* TODO: check cf.pos vs shelter */) {
+      cf._rainDamage = (cf._rainDamage || 0) + delta;
+      if (cf._rainDamage > 30) {
+        cf.lit = false;
+        cf._rainDamage = 0;
+        if (cf.light) { worldScene.remove(cf.light); cf.light = null; }
+        if (cf.fireId) { fireAudio.stop(cf.fireId); cf.fireId = null; }
+        showToast('Rain put out your campfire!');
+        continue;
+      }
+    } else {
+      cf._rainDamage = 0;
+    }
+    if (cf.light) {
       cf.light.intensity = 9 + Math.sin(elapsed * 7.8) * 2.2 + Math.sin(elapsed * 4.3) * 1.1;
       cf.light.color.setHSL(0.05 + Math.sin(elapsed * 1.8) * 0.015, 1.0, 0.55);
     }
@@ -3621,11 +3995,15 @@ function animate() {
   // Wildlife
   wildlifeManager.update(delta, camera.position);
 
+  // Foraging
+  foragingManager.update(delta, state.time.day);
+
   // Trapping (traps tick even with time frozen since timer uses real game hours)
   trapManager.update(delta, GAME_MINUTES_PER_SECOND, wildlifeManager);
 
-  // Cooking
+  // Cooking + Drying
   updateCooking(delta);
+  updateDryingRacks();
 
   // Vitals drain
   updateVitals(delta);
@@ -3869,9 +4247,12 @@ function animate() {
   const _campBtn = document.getElementById('camp-btn');
   if (_campBtn) {
     let cLabel = '🏕️';
+    const _nearForage = foragingManager.getNearby(camera.position, 4.0);
     if (nearestLantern()) { const _nl2 = nearestLantern(); cLabel = _nl2.data.on ? '💡 Off' : '💡 On'; }
     else if (nearestTent()) cLabel = '😴 Sleep';
     else if (state.player.health < 100 && state.inventory.find(i => i.name === 'First Aid Kit')) cLabel = '🩹 Heal';
+    else if (nearestDryingRack() && nearestDryingRack().data.slot && nearestDryingRack().data.slot.done) cLabel = '🥩 Collect dried';
+    else if (_nearForage) cLabel = `🌿 ${_nearForage.type.name}`;
     else if (state.inventory.find(i => EAT_VALUES[i.name])) cLabel = '🍖 Eat';
     else if (binDist < 5) cLabel = '📦 Bin';
     _campBtn.textContent = cLabel;
